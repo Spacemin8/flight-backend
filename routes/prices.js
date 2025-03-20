@@ -1,12 +1,93 @@
 const express = require('express');
 const router = express.Router();
 
+function processGridData(grid, yearMonth) {
+  const priceGrid = {};
+  let hasDirectFlight = false;
+
+  // Validate grid structure
+  if (!Array.isArray(grid) || grid.length === 0 || !Array.isArray(grid[0])) {
+    console.warn('Invalid grid format received');
+    return { priceGrid, hasDirectFlight };
+  }
+
+  // Process each day's data
+  grid[0].forEach((dayData, index) => {
+    // Skip if no data for this day
+    if (!dayData) return;
+
+    const day = (index + 1).toString().padStart(2, '0');
+    const date = `${yearMonth}-${day}`;
+
+    try {
+      // Check for direct flights first
+      if (
+        dayData.DirectOutboundAvailable === true &&
+        dayData.DirectOutbound &&
+        typeof dayData.DirectOutbound.Price === 'number' &&
+        dayData.DirectOutbound.Price > 0
+      ) {
+        hasDirectFlight = true;
+        priceGrid[date] = {
+          price: dayData.DirectOutbound.Price,
+          isDirect: true
+        };
+        console.log(
+          `Found direct flight for ${date}:`,
+          dayData.DirectOutbound.Price
+        );
+      }
+      // Check for indirect flights with Direct price
+      else if (
+        dayData.Direct &&
+        typeof dayData.Direct.Price === 'number' &&
+        dayData.Direct.Price > 0
+      ) {
+        priceGrid[date] = {
+          price: dayData.Direct.Price,
+          isDirect: false
+        };
+        console.log(
+          `Found indirect flight (Direct) for ${date}:`,
+          dayData.Direct.Price
+        );
+      }
+      // Check for indirect flights with Indirect price
+      else if (
+        dayData.Indirect &&
+        typeof dayData.Indirect.Price === 'number' &&
+        dayData.Indirect.Price > 0
+      ) {
+        priceGrid[date] = {
+          price: dayData.Indirect.Price,
+          isDirect: false
+        };
+        console.log(
+          `Found indirect flight (Indirect) for ${date}:`,
+          dayData.Indirect.Price
+        );
+      }
+    } catch (err) {
+      console.warn(`Error processing price for ${date}:`, err);
+    }
+  });
+
+  // Log summary
+  console.log('Processed grid data:', {
+    totalDays: Object.keys(priceGrid).length,
+    directFlights: Object.values(priceGrid).filter((p) => p.isDirect).length,
+    indirectFlights: Object.values(priceGrid).filter((p) => !p.isDirect).length,
+    hasDirectFlight
+  });
+
+  return { priceGrid, hasDirectFlight };
+}
+
 router.post('/update-prices', async (req, res) => {
   const { supabase } = req;
   const { batchSize = 10 } = req.body;
 
   try {
-    // Fetch routes needing a price update
     const { data: routes, error: routesError } = await supabase
       .from('route_demand_tracking')
       .select('*')
@@ -32,20 +113,12 @@ router.post('/update-prices', async (req, res) => {
 
         const priceData = await response.json();
 
-        // Transform API response to our price grid format
-        const priceGrid = {};
-        if (priceData.data?.PriceGrids?.Grid) {
-          priceData.data.PriceGrids.Grid.forEach((day, index) => {
-            const date = `${route.year_month}-${String(index + 1).padStart(
-              2,
-              '0'
-            )}`;
-            priceGrid[date] = {
-              price: day.DirectOutbound ? day.DirectOutbound.Price : null,
-              isDirect: day.DirectOutboundAvailable || false
-            };
-          });
-        }
+        const { priceGrid, hasDirectFlight } = processGridData(
+          priceData.data.PriceGrids.Grid,
+          route.year_month
+        );
+
+        console.log(priceGrid);
 
         // Update prices in database
         const { error: updateError } = await supabase
@@ -57,11 +130,9 @@ router.post('/update-prices', async (req, res) => {
               year_month: route.year_month,
               price_grid: priceGrid,
               last_update: new Date().toISOString(),
-              has_direct_flight: Object.values(priceGrid).some(
-                (p) => p.isDirect
-              )
+              has_direct_flight: hasDirectFlight
             },
-            { onConflict: ['origin', 'destination', 'year_month'] }
+            { onConflict: 'origin,destination,year_month' }
           );
 
         if (updateError) throw updateError;
