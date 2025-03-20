@@ -74,7 +74,7 @@ cron.schedule('0 */3 * * *', async () => {
 });
 
 // Check and update prices every 10 minutes
-cron.schedule('*/1 * * * *', async () => {
+cron.schedule('*/10 * * * *', async () => {
   try {
     const response = await fetch(`${process.env.BASE_URL}/api/update-prices`, {
       method: 'POST',
