@@ -43,14 +43,14 @@ app.use('/api', intervalRoutes);
 
 // Cron Jobs
 // Update demand levels daily at midnight
-cron.schedule('0 0 * * *', async () => {
+cron.schedule('0 5 * * *', async () => {
   try {
     const response = await fetch(`${process.env.BASE_URL}/api/update-demand`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ forceUpdate: false })
     });
-    console.log('Daily demand update completed');
+    console.log('Daily demand update completed at 6 AM Albania time.');
   } catch (error) {
     console.error('Error in demand update cron:', error);
   }
